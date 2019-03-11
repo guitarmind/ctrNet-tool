@@ -26,6 +26,8 @@ class Model(BaseModel):
     def build_graph(self, hparams):
         initializer = self._get_initializer(hparams)
         self.label = tf.placeholder(shape=(None), dtype=tf.float32)
+        self.sample_weights = tf.placeholder(name="loss_weights", shape=[None], dtype=tf.float32)
+
         self.use_norm=tf.placeholder(tf.bool)
         self.features=tf.placeholder(shape=(None,hparams.feature_nums), dtype=tf.int32)
         self.emb_v1=tf.get_variable(shape=[hparams.hash_ids,1],
@@ -81,7 +83,12 @@ class Model(BaseModel):
         self.prob=tf.sigmoid(logit)
         logit_1=tf.log(self.prob+1e-20)
         logit_0=tf.log(1-self.prob+1e-20)
-        self.loss=-tf.reduce_mean(self.label*logit_1+(1-self.label)*logit_0)
+        # self.loss =- tf.reduce_mean(self.label*logit_1+(1-self.label)*logit_0)
+
+        # Added sample weights
+        train_loss = self.label*logit_1+(1-self.label)*logit_0
+        self.loss =- tf.reduce_mean(self.sample_weights * train_loss)
+
         self.cost=-(self.label*logit_1+(1-self.label)*logit_0)
         self.saver= tf.train.Saver()
             
@@ -114,14 +121,23 @@ class Model(BaseModel):
                     T=(time.time()-start_time)
                     self.eval(T,dev_data,hparams,sess)
                     break
-                    
+
                 batch=train_data[0][idx*hparams.batch_size:\
                                     min((idx+1)*hparams.batch_size,len(train_data[0]))]
                 batch=utils.hash_batch(batch,hparams)
                 label=train_data[1][idx*hparams.batch_size:\
                                     min((idx+1)*hparams.batch_size,len(train_data[1]))]
+
+                sample_weights = train_data[2][idx*hparams.batch_size:\
+                                 min((idx+1)*hparams.batch_size,len(train_data[2]))]
+
                 loss,_,norm=sess.run([self.loss,self.update,self.grad_norm],feed_dict=\
-                                     {self.features:batch,self.label:label,self.use_norm:True})
+                                     {
+                                        self.features:batch,
+                                        self.label:label,
+                                        self.sample_weights: sample_weights,
+                                        self.use_norm:True
+                                      })
                 info['loss'].append(loss)
                 info['norm'].append(norm)
                 if (idx+1)%hparams.num_display_steps==0:
